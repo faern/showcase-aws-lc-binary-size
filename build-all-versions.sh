@@ -58,18 +58,19 @@ result_labels=()
 result_sizes=()
 
 record_size() {
-    local label="$1"
+    local file_label="$1"
+    local display_label="$2"
     local size
     size=$(wc -c < "${BIN_PATH}" | tr -d ' ')
-    result_labels+=("${label}")
+    result_labels+=("${display_label}")
     result_sizes+=("${size}")
-    cp "${BIN_PATH}" "${RESULTS_DIR}/bin.${label}"
-    printf "    %s: %d bytes\n" "${label}" "${size}"
+    cp "${BIN_PATH}" "${RESULTS_DIR}/bin.${file_label}"
+    printf "    %s: %d bytes\n" "${display_label}" "${size}"
 }
 
 echo "==> Building ring baseline"
 cargo build --release --features ring
-record_size "ring"
+record_size "ring" "ring"
 ring_size="${result_sizes[0]}"
 
 # All 2^3 = 8 combinations of the three flags, including the empty (no-flags)
@@ -86,16 +87,15 @@ for mask in $(seq 0 7); do
     cflags="${cflags# }"
 
     if [ ${#label_parts[@]} -eq 0 ]; then
-        label="aws-lc-default"
+        file_label="aws-lc-default"
+        display_label="aws-lc (default)"
     else
         joined=$(IFS=-; echo "${label_parts[*]}")
-        label="aws-lc-${joined}"
+        file_label="aws-lc-${joined}"
+        display_label="aws-lc (${cflags})"
     fi
 
-    echo "==> Building ${label}"
-    if [ -n "${cflags}" ]; then
-        echo "    CFLAGS=\"${cflags}\""
-    fi
+    echo "==> Building ${display_label}"
 
     # Force aws-lc-sys to recompile so the new CFLAGS take effect. Without
     # this the cached static lib from a previous iteration gets reused.
@@ -103,25 +103,34 @@ for mask in $(seq 0 7); do
 
     env "${ENV_VAR}=${cflags}" \
         cargo build --release --features aws-lc
-    record_size "${label}"
+    record_size "${file_label}" "${display_label}"
 done
 
-# Final table.
+# Final table. Width of the label column adapts to the longest value so
+# columns line up regardless of which flag combinations were built.
+max_w=5  # at least "Build"
+for label in "${result_labels[@]}"; do
+    [ "${#label}" -gt "${max_w}" ] && max_w="${#label}"
+done
+size_w=10
+diff_w=12
+total_w=$((max_w + size_w + 4 + diff_w))
+
 echo
-echo "============================================================"
-printf "%-30s %12s %15s\n" "Build" "Size (KiB)" "Diff vs ring"
-echo "------------------------------------------------------------"
+printf '%*s\n' "${total_w}" '' | tr ' ' '='
+printf "%-${max_w}s%${size_w}s    %${diff_w}s\n" "Build" "Size (KiB)" "Diff vs ring"
+printf '%*s\n' "${total_w}" '' | tr ' ' '-'
 for i in "${!result_labels[@]}"; do
     label="${result_labels[$i]}"
     size="${result_sizes[$i]}"
     diff=$((size - ring_size))
     kib=$(awk -v s="${size}" 'BEGIN { printf "%d", s/1024 }')
     if [ "${diff}" -gt 0 ]; then
-        diff_kib=$(awk -v d="${diff}" 'BEGIN { printf "+%d KiB", d/1024 }')
+        diff_str=$(awk -v d="${diff}" 'BEGIN { printf "+%d KiB", d/1024 }')
     elif [ "${diff}" -lt 0 ]; then
-        diff_kib=$(awk -v d="${diff}" 'BEGIN { printf "%d KiB", d/1024 }')
+        diff_str=$(awk -v d="${diff}" 'BEGIN { printf "%d KiB", d/1024 }')
     else
-        diff_kib="0"
+        diff_str="0"
     fi
-    printf "%-30s %12s %15s\n" "${label}" "${kib}" "${diff_kib}"
+    printf "%-${max_w}s%${size_w}s    %${diff_w}s\n" "${label}" "${kib}" "${diff_str}"
 done
