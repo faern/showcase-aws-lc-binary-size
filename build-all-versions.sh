@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 # Build the ring baseline and every combination of three aws-lc-sys CFLAGS,
 # then print a table comparing binary sizes against ring.
-#
-# Assumes .cargo/config.toml has the AWS_LC_SYS_CFLAGS_* line commented out
-# so the only CFLAGS in effect are the ones this script sets.
 set -euo pipefail
 
 # Ensure the binary lands at the path we expect. A CARGO_TARGET_DIR inherited
@@ -16,11 +13,24 @@ case "$(uname -s)" in
     *)                    BIN_EXT="";     IS_WINDOWS=0 ;;
 esac
 BIN_PATH="target/release/${BIN_NAME}${BIN_EXT}"
-# The non-target-suffixed env var works on Linux, macOS and Windows. Higher-
-# priority vars (AWS_LC_SYS_TARGET_CFLAGS, TARGET_CFLAGS, the per-target
-# variants) must be unset in the environment for this to take effect.
-ENV_VAR="AWS_LC_SYS_CFLAGS"
 RESULTS_DIR="size-results"
+
+# We set AWS_LC_SYS_TARGET_CFLAGS per iteration. That's step 2 in
+# aws-lc-sys's resolution chain, and it outranks the project's per-target
+# AWS_LC_SYS_CFLAGS_<target> entries from .cargo/config.toml (step 5),
+# so we don't need to fight cargo's [env] re-injection.
+#
+# The only thing that could still shadow us is a higher-priority
+# AWS_LC_SYS_* CFLAGS variant exported in the surrounding shell -
+# specifically AWS_LC_SYS_TARGET_CFLAGS_<host>. Clear any such variant
+# from the env without bothering to detect or format the triple.
+while IFS= read -r var; do
+    case "$var" in
+        AWS_LC_SYS_*CFLAGS*) unset "$var" ;;
+    esac
+done < <(compgen -e)
+
+ENV_VAR="AWS_LC_SYS_TARGET_CFLAGS"
 
 mkdir -p "${RESULTS_DIR}"
 
