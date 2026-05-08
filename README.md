@@ -1,76 +1,49 @@
 # showcase-aws-lc-binary-size
 
 Minimal repro for the aws-lc-rs binary size regression vs ring, and the
-CFLAGS-based mitigation. Just does an HTTPS GET to
-`https://am.i.mullvad.net/json` and prints the response.
+CFLAGS workaround. Does an HTTPS GET to `https://am.i.mullvad.net/json`
+and prints the response.
 
-Linux x86_64 only.
-
-## Three builds
+## Run the benchmark
 
 ```sh
-# 1. ring (baseline)
-cargo build --release --no-default-features --features ring
-
-# 2. aws-lc-rs, no size CFLAGS (override the .cargo/config.toml [env] entries)
-AWS_LC_SYS_CFLAGS= AWS_LC_SYS_CFLAGS_x86_64_unknown_linux_gnu= \
-    cargo build --release --no-default-features --features aws-lc \
-    --target-dir target-aws-lc-default
-
-# 3. aws-lc-rs with size CFLAGS (uses .cargo/config.toml as-is)
-cargo build --release --no-default-features --features aws-lc \
-    --target-dir target-aws-lc-trim
+./build-all-versions.sh
 ```
 
-The override in (2) is needed because cargo merges `.cargo/config.toml`
-files from the current directory up to `$HOME`. If you're running this from
-inside another repo with its own `[env]` section, those entries also apply
-unless you blank them on the command line.
+Builds ring (baseline) and every combination of three aws-lc-sys size
+knobs, then prints a comparison table. Works on Linux, macOS and Windows
+(MSYS/Git Bash).
 
-## Observed sizes (rustc 1.95.0, opt-level=s + LTO + strip)
+The script clears any `AWS_LC_SYS_*CFLAGS*` in the surrounding shell
+and passes its own value via `AWS_LC_SYS_TARGET_CFLAGS`, which outranks
+the per-target entries in `.cargo/config.toml`, so the recorded sizes
+reflect only the script's flags.
 
-| build | bytes | text | delta vs ring |
-| --- | ---: | ---: | ---: |
-| ring | 1,849,528 | 1,790,272 | 0 |
-| aws-lc-rs default | 3,768,296 | 3,666,337 | **+1.92 MB (+103.7%)** |
-| aws-lc-rs + CFLAGS | 2,186,664 | 2,087,342 | **+337 KB (+18.2%)** |
+Out of the box aws-lc-rs more than doubles the binary vs ring; the
+flags in `.cargo/config.toml` recover ~80% of that.
 
-Just swapping ring for aws-lc-rs more than doubles the binary. The CFLAGS
-knobs in `.cargo/config.toml` recover ~82% of that.
+## The flags
 
-## What the CFLAGS do
+- `-DOPENSSL_SMALL`: drops a 148 KiB precomputed P-256 table plus
+  ~30 KiB of Ed25519 base-point tables (curve25519). Slows Ed25519
+  signing 1.5-2x and ECDSA P-256 verify a few x.
+- `-DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX`: excludes ~660 KiB of AVX-512
+  AES-GCM/AES-XTS asm. Falls back to AVX2/AES-NI. x86_64-only.
+- `/Gw` (MSVC only): per-global COMDAT sections so the linker can drop
+  unreferenced data tables. `/Gy` is already implied by `/O1`/`/O2`.
+  The GCC equivalent `-ffunction-sections -fdata-sections` is
+  unnecessary on Linux/macOS/Android because cc-rs already adds it,
+  and intentionally skipped by cc-rs on iOS.
 
-```toml
-AWS_LC_SYS_CFLAGS_x86_64_unknown_linux_gnu = \
-    "-ffunction-sections -fdata-sections -DOPENSSL_SMALL -DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX"
-```
+Optional, not in `.cargo/config.toml`:
 
-- `-ffunction-sections -fdata-sections`: per-function/global sections so the
-  linker's `--gc-sections` can drop unused crypto. AWS-LC's `CMakeLists.txt`
-  doesn't enable these, unlike ring (which gets them via `cc-rs`).
-- `-DOPENSSL_SMALL`: drops a 148 KiB precomputed P-256 table and a few
-  other space/time tables. Slows P-256 ECDSA verify by a few x.
-- `-DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX`: excludes ~664 KiB of AVX-512
-  AES-GCM and AES-XTS asm. AES-GCM falls back to AVX2/AES-NI.
+- `AWS_LC_SYS_NO_JITTER_ENTROPY=1`: drops the bundled
+  jitterentropy-library (~20 KiB). aws-lc still seeds its DRBG from
+  the OS RNG (getentropy/getrandom/BCryptGenRandom). Don't set this
+  for FIPS builds.
 
-`aws-lc-sys` lowercases the target triple in the per-target env-var name
-(different from `cc-rs` which uppercases), so the variable is
-`AWS_LC_SYS_CFLAGS_x86_64_unknown_linux_gnu`, not `..._X86_64_...`. Easy to
-get wrong.
+`aws-lc-sys` lowercases the target triple in the per-target env-var
+name (unlike `cc-rs` which uppercases), so the variable is
+`AWS_LC_SYS_CFLAGS_x86_64_unknown_linux_gnu`, not `..._X86_64_...`.
 
-## Verifying
-
-```sh
-# Quick smoke test - all three should print the same JSON.
-./target/release/showcase-aws-lc-binary-size
-./target-aws-lc-default/release/showcase-aws-lc-binary-size
-./target-aws-lc-trim/release/showcase-aws-lc-binary-size
-
-# What's actually in the static lib? (look at .text per-function vs per-.o)
-objdump -h target/release/build/ring-*/out/libring_core_*_.a \
-    | grep -E '\.text\.[a-z]' | head
-objdump -h target-aws-lc-trim/release/build/aws-lc-sys-*/out/libaws_lc_*_crypto.a \
-    | grep -E '\.text\.[a-z]' | head
-```
-
-Tracking issue upstream: <https://github.com/aws/aws-lc-rs/issues/745>.
+Tracking issue: <https://github.com/aws/aws-lc-rs/issues/745>.
