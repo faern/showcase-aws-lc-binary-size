@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the ring baseline and every combination of three aws-lc-sys CFLAGS,
+# Build the ring baseline and every combination of two aws-lc-sys CFLAGS,
 # then print a table comparing binary sizes against ring.
 set -euo pipefail
 
@@ -9,8 +9,8 @@ unset CARGO_TARGET_DIR
 
 BIN_NAME="showcase-aws-lc-binary-size"
 case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*) BIN_EXT=".exe"; IS_WINDOWS=1 ;;
-    *)                    BIN_EXT="";     IS_WINDOWS=0 ;;
+    MINGW*|MSYS*|CYGWIN*) BIN_EXT=".exe" ;;
+    *)                    BIN_EXT="" ;;
 esac
 BIN_PATH="target/release/${BIN_NAME}${BIN_EXT}"
 RESULTS_DIR="size-results"
@@ -34,25 +34,17 @@ ENV_VAR="AWS_LC_SYS_TARGET_CFLAGS"
 
 mkdir -p "${RESULTS_DIR}"
 
-# Three CFLAGS knobs we want to combinatorially test.
-#
-# fsec: -ffunction-sections / -fdata-sections on GCC/Clang. On MSVC the
-#   equivalents are /Gy (function-level linking) and /Gw (data). cc-rs
-#   passes /O1 (opt-level=s) or /O2 (opt-level=2/3); both imply /Gy, so
-#   only /Gw needs to be set explicitly. The GCC syntax is unknown to
-#   cl.exe, so we swap the flag string when running on Windows.
-if [ "${IS_WINDOWS}" = "1" ]; then
-    FSEC_FLAGS="/Gw"
-else
-    FSEC_FLAGS="-ffunction-sections -fdata-sections"
-fi
+# Two CFLAGS knobs we want to combinatorially test. -ffunction-sections /
+# -fdata-sections (GCC/Clang) and /Gw (MSVC) used to be a third dimension
+# but every measurement showed them as no-ops in this build profile:
+# cc-rs already passes the GCC pair on Linux/macOS/Android, and rust-lld's
+# whole-program LTO already handles the MSVC equivalent.
 FLAGS=(
-    "${FSEC_FLAGS}"
     "-DOPENSSL_SMALL"
     "-DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX"
 )
-# Short labels for each flag, used in result table.
-LABELS=("fsec" "small" "noavx512")
+# Short labels for each flag, used as filename suffixes in size-results/.
+LABELS=("small" "noavx512")
 
 result_labels=()
 result_sizes=()
@@ -73,12 +65,12 @@ cargo build --release --features ring
 record_size "ring" "ring"
 ring_size="${result_sizes[0]}"
 
-# All 2^3 = 8 combinations of the three flags, including the empty (no-flags)
+# All 2^2 = 4 combinations of the two flags, including the empty (no-flags)
 # combination that reproduces the default aws-lc-rs build.
-for mask in $(seq 0 7); do
+for mask in $(seq 0 3); do
     cflags=""
     label_parts=()
-    for i in 0 1 2; do
+    for i in 0 1; do
         if (( (mask >> i) & 1 )); then
             cflags+=" ${FLAGS[$i]}"
             label_parts+=("${LABELS[$i]}")

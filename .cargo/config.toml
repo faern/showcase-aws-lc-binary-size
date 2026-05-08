@@ -7,13 +7,12 @@
 # - -DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX: drops ~660 KiB of AVX-512
 #   AES-GCM/AES-XTS asm in favor of AVX2/AES-NI. x86_64-only; the define
 #   does nothing on ARM and isn't relevant to 32-bit x86.
-# - /Gw (MSVC only): per-global COMDAT sections so the linker can drop
-#   unreferenced individual data tables. /Gy (function-level linking) is
-#   already implied by /O1 (opt-level=s) and /O2 (opt-level=2/3).
 #
-# We intentionally don't set -ffunction-sections / -fdata-sections: cc-rs
-# already adds them on the GNU/Clang families for non-Apple-mobile targets,
-# and intentionally skips them on iOS / watchOS / tvOS / visionOS.
+# We intentionally don't set per-function/per-global section flags. cc-rs
+# already adds -ffunction-sections / -fdata-sections on the GNU/Clang
+# families for non-Apple-mobile targets, and on MSVC the equivalents
+# (/Gy implied by /O1 or /O2; /Gw) turned out to be redundant under LTO -
+# rust-lld already drops unused functions and globals.
 #
 # Note: aws-lc-sys lowercases the target triple in the per-target env-var
 # name (different from cc-rs which uppercases).
@@ -39,7 +38,6 @@ AWS_LC_SYS_CFLAGS_armv7_linux_androideabi = "-DOPENSSL_SMALL"
 AWS_LC_SYS_CFLAGS_x86_64_linux_android = "-DOPENSSL_SMALL -DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX"
 AWS_LC_SYS_CFLAGS_i686_linux_android = "-DOPENSSL_SMALL"
 
-# Windows MSVC (clang-cl on aarch64; cl.exe on x86_64). Both accept /Gw
-# and -D for defines.
-AWS_LC_SYS_CFLAGS_x86_64_pc_windows_msvc = "/Gw -DOPENSSL_SMALL -DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX"
-AWS_LC_SYS_CFLAGS_aarch64_pc_windows_msvc = "/Gw -DOPENSSL_SMALL"
+# Windows MSVC (clang-cl on aarch64; cl.exe on x86_64).
+AWS_LC_SYS_CFLAGS_x86_64_pc_windows_msvc = "-DOPENSSL_SMALL -DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX"
+AWS_LC_SYS_CFLAGS_aarch64_pc_windows_msvc = "-DOPENSSL_SMALL"

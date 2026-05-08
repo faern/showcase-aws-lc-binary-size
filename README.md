@@ -29,11 +29,11 @@ flags in `.cargo/config.toml` recover ~80% of that.
   signing 1.5-2x and ECDSA P-256 verify a few x.
 - `-DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX`: excludes ~660 KiB of AVX-512
   AES-GCM/AES-XTS asm. Falls back to AVX2/AES-NI. x86_64-only.
-- `/Gw` (MSVC only): per-global COMDAT sections so the linker can drop
-  unreferenced data tables. `/Gy` is already implied by `/O1`/`/O2`.
-  The GCC equivalent `-ffunction-sections -fdata-sections` is
-  unnecessary on Linux/macOS/Android because cc-rs already adds it,
-  and intentionally skipped by cc-rs on iOS.
+
+`-ffunction-sections -fdata-sections` (GCC/Clang) and `/Gw` (MSVC) were
+also tested but had no measurable effect on this build profile: cc-rs
+already adds the GCC pair on Linux/macOS/Android, and rust-lld's LTO
+already strips unreferenced functions and globals on MSVC.
 
 Optional, not in `.cargo/config.toml`:
 
