@@ -1,0 +1,45 @@
+# Per-target CFLAGS that minimize the aws-lc-sys static lib's contribution
+# to the final binary, across every target this crate ships to.
+#
+# - -DOPENSSL_SMALL: drops the 148 KiB precomputed P-256 table plus a few
+#   curve25519 large tables. Slows P-256 ECDSA verify a few x. Useful on
+#   every target.
+# - -DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX: drops ~660 KiB of AVX-512
+#   AES-GCM/AES-XTS asm in favor of AVX2/AES-NI. x86_64-only; the define
+#   does nothing on ARM and isn't relevant to 32-bit x86.
+# - /Gw (MSVC only): per-global COMDAT sections so the linker can drop
+#   unreferenced individual data tables. /Gy (function-level linking) is
+#   already implied by /O1 (opt-level=s) and /O2 (opt-level=2/3).
+#
+# We intentionally don't set -ffunction-sections / -fdata-sections: cc-rs
+# already adds them on the GNU/Clang families for non-Apple-mobile targets,
+# and intentionally skips them on iOS / watchOS / tvOS / visionOS.
+#
+# Note: aws-lc-sys lowercases the target triple in the per-target env-var
+# name (different from cc-rs which uppercases).
+#
+# To rebuild WITHOUT these flags (to measure default aws-lc-rs), override
+# on the command line:
+#   AWS_LC_SYS_CFLAGS_<target>= cargo build --release ...
+[env]
+# Linux
+AWS_LC_SYS_CFLAGS_x86_64_unknown_linux_gnu = "-DOPENSSL_SMALL -DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX"
+AWS_LC_SYS_CFLAGS_aarch64_unknown_linux_gnu = "-DOPENSSL_SMALL"
+
+# macOS
+AWS_LC_SYS_CFLAGS_x86_64_apple_darwin = "-DOPENSSL_SMALL -DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX"
+AWS_LC_SYS_CFLAGS_aarch64_apple_darwin = "-DOPENSSL_SMALL"
+
+# iOS
+AWS_LC_SYS_CFLAGS_aarch64_apple_ios = "-DOPENSSL_SMALL"
+
+# Android
+AWS_LC_SYS_CFLAGS_aarch64_linux_android = "-DOPENSSL_SMALL"
+AWS_LC_SYS_CFLAGS_armv7_linux_androideabi = "-DOPENSSL_SMALL"
+AWS_LC_SYS_CFLAGS_x86_64_linux_android = "-DOPENSSL_SMALL -DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX"
+AWS_LC_SYS_CFLAGS_i686_linux_android = "-DOPENSSL_SMALL"
+
+# Windows MSVC (clang-cl on aarch64; cl.exe on x86_64). Both accept /Gw
+# and -D for defines.
+AWS_LC_SYS_CFLAGS_x86_64_pc_windows_msvc = "/Gw -DOPENSSL_SMALL -DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX"
+AWS_LC_SYS_CFLAGS_aarch64_pc_windows_msvc = "/Gw -DOPENSSL_SMALL"
