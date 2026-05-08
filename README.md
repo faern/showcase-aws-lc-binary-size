@@ -1,8 +1,11 @@
 # showcase-aws-lc-binary-size
 
 Minimal repro for the aws-lc-rs binary size regression vs ring, and the
-CFLAGS workaround. Does an HTTPS GET to `https://am.i.mullvad.net/json`
-and prints the response.
+CFLAGS workaround.
+
+This program does an HTTPS GET to `https://am.i.mullvad.net/json` and prints
+the response. But that is not important. We only build this to check the binary
+size.
 
 ## Run the benchmark
 
@@ -19,16 +22,21 @@ and passes its own value via `AWS_LC_SYS_TARGET_CFLAGS`, which outranks
 the per-target entries in `.cargo/config.toml`, so the recorded sizes
 reflect only the script's flags.
 
-Out of the box aws-lc-rs more than doubles the binary vs ring; the
-flags in `.cargo/config.toml` recover ~80% of that.
+Out of the box aws-lc-rs more than doubles the binary vs ring. The
+flags in `.cargo/config.toml` recover most of that on x86_64
+(Linux/macOS) and roughly half on aarch64 and Windows MSVC. See the
+per-target tables below.
 
 ## The flags
 
-- `-DOPENSSL_SMALL`: drops a 148 KiB precomputed P-256 table plus
-  ~30 KiB of Ed25519 base-point tables (curve25519). Slows Ed25519
-  signing 1.5-2x and ECDSA P-256 verify a few x.
-- `-DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX`: excludes ~660 KiB of AVX-512
-  AES-GCM/AES-XTS asm. Falls back to AVX2/AES-NI. x86_64-only.
+- `-DOPENSSL_SMALL`: drops large precomputed tables (P-256 ECDH/ECDSA,
+  Ed25519 base point). Saves ~350-500 KiB on every target. Slows
+  ECDSA P-256 verify a few x and Ed25519 signing 1.5-2x.
+- `-DMY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX`: drops AVX-512 AES-GCM/AES-XTS
+  asm in favor of AVX2/AES-NI. x86_64-only - no-op on ARM. Saves
+  ~1.2 MiB on Linux/macOS x86_64; only ~25 KiB on Windows MSVC x86_64
+  because aws-lc's prebuilt NASM .obj for AVX-512 AES-GCM is already
+  empty (NASM historically lacked the relevant EVEX encoding).
 
 `-ffunction-sections -fdata-sections` (GCC/Clang) and `/Gw` (MSVC) were
 also tested but had no measurable effect on this build profile: cc-rs
@@ -38,9 +46,9 @@ already strips unreferenced functions and globals on MSVC.
 Optional, not in `.cargo/config.toml`:
 
 - `AWS_LC_SYS_NO_JITTER_ENTROPY=1`: drops the bundled
-  jitterentropy-library (~20 KiB). aws-lc still seeds its DRBG from
-  the OS RNG (getentropy/getrandom/BCryptGenRandom). Don't set this
-  for FIPS builds.
+  jitterentropy-library (a few tens of KiB). aws-lc still seeds its
+  DRBG from the OS RNG (getentropy/getrandom/BCryptGenRandom). Don't
+  set this for FIPS builds.
 
 `aws-lc-sys` lowercases the target triple in the per-target env-var
 name (unlike `cc-rs` which uppercases), so the variable is
